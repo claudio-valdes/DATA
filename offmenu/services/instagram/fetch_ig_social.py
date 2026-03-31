@@ -2,14 +2,16 @@
 Fetch Instagram profile + posts + hashtag posts for a restaurant via Apify.
 
 Usage:
-    python scripts/fetch_ig_social.py <restaurant_id>
+    python offmenu/services/instagram/fetch_ig_social.py --slug <slug>
+    python offmenu/services/instagram/fetch_ig_social.py --all
 
 Required env vars:
     APIFY_TOKEN
-    NEXT_PUBLIC_SUPABASE_URL
-    NEXT_PUBLIC_SUPABASE_ANON_KEY
+    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
+    SUPABASE_KEY  (or NEXT_PUBLIC_SUPABASE_ANON_KEY)
 """
 
+import argparse
 import os
 import sys
 import time
@@ -20,8 +22,8 @@ from supabase import create_client
 
 load_dotenv(".env.local")
 
-SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_KEY = os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+SUPABASE_URL = os.environ.get("SUPABASE_URL") or os.environ["NEXT_PUBLIC_SUPABASE_URL"]
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
 # Berlin-specific hashtags for discovery
@@ -36,22 +38,58 @@ BERLIN_HASHTAGS = [
 ]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fetch Instagram profiles and posts via Apify")
+    parser.add_argument("--slug", help="Process one restaurant by slug")
+    parser.add_argument("--all", action="store_true", help="Process all restaurants with an IG handle")
+    args = parser.parse_args()
+
+    if bool(args.slug) == bool(args.all):
+        parser.error("Use exactly one of --slug or --all")
+
+    return args
+
+
+def fetch_restaurants(supabase, slug: str | None) -> list[dict]:
+    if slug:
+        r = supabase.table("silver_restaurants").select("place_id").eq("slug", slug).execute()
+        if not r.data:
+            return []
+        place_id = r.data[0]["place_id"]
+        r2 = (
+            supabase.table("restaurant_social_handles")
+            .select("restaurant_id, ig_handle")
+            .eq("restaurant_id", place_id)
+            .execute()
+        )
+        return [row for row in (r2.data or []) if row.get("ig_handle")]
+
+    rows = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        result = (
+            supabase.table("restaurant_social_handles")
+            .select("restaurant_id, ig_handle")
+            .not_.is_("ig_handle", "null")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        rows.extend(row for row in batch if row.get("ig_handle"))
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return rows
+
+
 def run_apify_actor(actor_id: str, input_payload: dict) -> list:
     url = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
     response = httpx.post(url, json=input_payload, timeout=300)
     response.raise_for_status()
     return response.json()
-
-
-def get_ig_handle(supabase, restaurant_id: str) -> str | None:
-    r = supabase.table("restaurant_social_handles") \
-        .select("ig_handle") \
-        .eq("restaurant_id", restaurant_id) \
-        .single() \
-        .execute()
-    if not r.data or not r.data.get("ig_handle"):
-        return None
-    return r.data["ig_handle"]
 
 
 def upsert_profile(supabase, restaurant_id: str, ig_handle: str, items: list):
@@ -145,34 +183,45 @@ def upsert_hashtag_posts(supabase, hashtag: str, items: list) -> int:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python fetch_ig_social.py <restaurant_id>")
-        sys.exit(1)
-
-    restaurant_id = sys.argv[1]
+    args = parse_args()
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    restaurants = fetch_restaurants(supabase, args.slug)
 
-    ig_handle = get_ig_handle(supabase, restaurant_id)
-    if not ig_handle:
-        print(f"No Instagram handle found for restaurant_id={restaurant_id}. Exiting.")
+    if not restaurants:
+        target = args.slug or "all restaurants"
+        print(f"⚠️ No restaurants with IG handle found for {target}")
         sys.exit(0)
 
-    print(f"Fetching Instagram profile for @{ig_handle}...")
-    try:
-        items = run_apify_actor("apify~instagram-profile-scraper", {
-            "usernames": [ig_handle],
-            "resultsLimit": 50,
-        })
-        posts = upsert_profile(supabase, restaurant_id, ig_handle, items)
-        posts = posts or []
-        post_count = upsert_posts(supabase, restaurant_id, ig_handle, posts)
-        print(f"  Posts upserted: {post_count}")
-    except Exception as e:
-        print(f"  ERROR fetching profile: {e}")
+    print(f"Processing {len(restaurants)} restaurants...")
 
-    time.sleep(2)
+    scraped = 0
+    errors = 0
 
-    print(f"Fetching hashtag posts for {len(BERLIN_HASHTAGS)} Berlin hashtags...")
+    for index, row in enumerate(restaurants):
+        restaurant_id = row["restaurant_id"]
+        ig_handle = row["ig_handle"]
+
+        print(f"Fetching Instagram profile for @{ig_handle}...")
+        try:
+            items = run_apify_actor("apify~instagram-profile-scraper", {
+                "usernames": [ig_handle],
+                "resultsLimit": 50,
+            })
+            posts = upsert_profile(supabase, restaurant_id, ig_handle, items) or []
+            post_count = upsert_posts(supabase, restaurant_id, ig_handle, posts)
+            print(f"  Posts upserted: {post_count}")
+            scraped += 1
+        except Exception as e:
+            errors += 1
+            print(f"  ✗ @{ig_handle} → {e}")
+
+        if index < len(restaurants) - 1:
+            time.sleep(2)
+
+    print(f"\n---")
+    print(f"Profiles: {scraped}/{len(restaurants)} scraped, {errors} errors")
+
+    print(f"\nFetching hashtag posts for {len(BERLIN_HASHTAGS)} Berlin hashtags...")
     total_hashtag_posts = 0
     for hashtag in BERLIN_HASHTAGS:
         try:
@@ -185,12 +234,11 @@ def main():
             print(f"  #{hashtag}: {count} posts")
             time.sleep(2)
         except Exception as e:
-            print(f"  ERROR fetching #{hashtag}: {e}")
-            continue
+            print(f"  ✗ #{hashtag} → {e}")
 
-    print(f"\n✓ Profile + posts fetched for @{ig_handle}")
-    print(f"✓ Hashtag posts upserted: {total_hashtag_posts}")
+    print(f"Hashtag posts upserted: {total_hashtag_posts}")
+    return 0 if errors == 0 else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

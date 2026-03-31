@@ -17,7 +17,6 @@ TRIPADVISOR_DOMAIN = "www.tripadvisor.com"
 
 def load_environment() -> tuple[str, str, str]:
     load_dotenv(".env.local")
-    load_dotenv(".env")
 
     serpapi_key = os.getenv("SERPAPI_KEY")
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
@@ -50,16 +49,34 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_restaurants(supabase: Any, slug: str | None) -> list[dict[str, Any]]:
-    query = supabase.table("silver_restaurants").select(
-        "raw_ingestion_id, slug, name, review_count"
-    )
-
     if slug:
-        query = query.eq("slug", slug)
+        result = (
+            supabase.table("silver_restaurants")
+            .select("raw_ingestion_id, slug, name, review_count")
+            .eq("slug", slug)
+            .execute()
+        )
+        rows = result.data or []
+        return [row for row in rows if row.get("slug") and row.get("name")]
 
-    result = query.execute()
-    rows = result.data or []
-    return [row for row in rows if row.get("slug") and row.get("name")]
+    rows = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        result = (
+            supabase.table("silver_restaurants")
+            .select("raw_ingestion_id, slug, name, review_count")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        rows.extend(row for row in batch if row.get("slug") and row.get("name"))
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return rows
 
 
 def google_search_tripadvisor_url(serpapi_key: str, restaurant_name: str, address: str | None) -> dict[str, Any]:

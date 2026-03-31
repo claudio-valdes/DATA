@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import time
+from collections import defaultdict
 from statistics import mean
 from typing import Any
 
@@ -12,18 +13,8 @@ from serpapi import GoogleSearch
 from supabase import create_client
 
 
-CUISINE_QUERIES = [
-    "vietnamesisches Restaurant",
-    "chinesisches Restaurant",
-    "italienisches Restaurant",
-    "türkisches Restaurant",
-    "japanisches Restaurant",
-    "koreanisches Restaurant",
-    "Thai Restaurant",
-    "indisches Restaurant",
-    "libanesisches Restaurant",
-    "mexikanisches Restaurant",
-]
+LABEL_TYPES = ["cuisine", "cuisine_sub", "atmosphere", "offering"]
+MIN_RESTAURANT_COUNT = 5
 
 GEO = "DE"
 PERIOD = "today 12-m"
@@ -32,7 +23,6 @@ TZ = "-60"
 
 def load_environment() -> tuple[str, str, str]:
     load_dotenv(".env.local")
-    load_dotenv(".env")
 
     serpapi_key = os.getenv("SERPAPI_KEY")
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
@@ -53,15 +43,46 @@ def load_environment() -> tuple[str, str, str]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape cuisine-level Google Trends data for Germany using cuisine-category queries")
-    parser.add_argument("--query", help="Run a single cuisine query")
-    parser.add_argument("--all", action="store_true", help="Run all cuisine queries")
+    parser = argparse.ArgumentParser(description="Scrape Google Trends data for restaurant labels from silver_labels")
+    parser.add_argument("--query", help="Run a single query (e.g. 'romantic restaurant')")
+    parser.add_argument("--all", action="store_true", help="Run all queries derived from silver_labels")
     args = parser.parse_args()
 
     if bool(args.query) == bool(args.all):
         parser.error("Use exactly one of --query or --all")
 
     return args
+
+
+def fetch_label_queries(supabase: Any) -> list[str]:
+    rows: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        result = (
+            supabase.table("silver_labels")
+            .select("place_id, label_value")
+            .in_("label_type", LABEL_TYPES)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    label_places: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        if row.get("label_value") and row.get("place_id"):
+            label_places[row["label_value"]].add(row["place_id"])
+
+    return sorted(
+        f"{label_value} restaurant"
+        for label_value, place_ids in label_places.items()
+        if len(place_ids) >= MIN_RESTAURANT_COUNT
+    )
 
 
 def fetch_trends(serpapi_key: str, query: str) -> dict[str, Any]:
@@ -196,7 +217,12 @@ def main() -> int:
         return 1
 
     supabase = create_client(supabase_url, supabase_key)
-    queries = [args.query] if args.query else CUISINE_QUERIES
+
+    if args.query:
+        queries = [args.query]
+    else:
+        queries = fetch_label_queries(supabase)
+        print(f"Found {len(queries)} label queries from silver_labels")
 
     scraped = 0
 

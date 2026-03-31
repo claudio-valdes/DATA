@@ -1,0 +1,7 @@
+supabase
+python-dotenv
+requests
+httpx
+outscraper
+serpapi
+apify-client

@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import date, timedelta
 from typing import Any
 
 import requests
@@ -13,7 +14,6 @@ from supabase import create_client
 
 def load_environment() -> tuple[str, str, str]:
     load_dotenv(".env.local")
-    load_dotenv(".env")
 
     api_key = os.getenv("OUTSCRAPER_API_KEY")
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
@@ -35,6 +35,16 @@ def load_environment() -> tuple[str, str, str]:
 
 OUTSCRAPER_URL = "https://api.app.outscraper.com/emails-and-contacts"
 
+# Domains that are not restaurant websites — scraping them returns wrong or useless contact data.
+# instagram.com / facebook.com: the restaurant's "website" IS their social page — handle is
+# extracted directly from the URL in the SQL backfill step rather than via API.
+# speisekartenweb.de: aggregator that hosts menu pages for many restaurants.
+SKIP_DOMAINS = [
+    "instagram.com",
+    "facebook.com",
+    "speisekartenweb.de",
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scrape restaurant emails and contact details")
@@ -49,19 +59,61 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_restaurants(supabase: Any, slug: str | None) -> list[dict[str, Any]]:
-    query = (
-        supabase.table("silver_restaurants")
-        .select("raw_ingestion_id, slug, website")
-        .neq("website", "null")
-    )
-
     if slug:
-        query = query.eq("slug", slug)
+        result = (
+            supabase.table("silver_restaurants")
+            .select("raw_ingestion_id, slug, place_id, website")
+            .eq("slug", slug)
+            .execute()
+        )
+        rows = result.data or []
+        return [row for row in rows if row.get("website")]
 
-    result = query.execute()
-    rows = result.data or []
+    rows = []
+    page_size = 1000
+    offset = 0
 
-    return [row for row in rows if row.get("website")]
+    while True:
+        result = (
+            supabase.table("silver_restaurants")
+            .select("raw_ingestion_id, slug, place_id, website")
+            .neq("website", "null")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        rows.extend(
+            row for row in batch
+            if row.get("website") and not any(d in row["website"] for d in SKIP_DOMAINS)
+        )
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return rows
+
+
+def fetch_recently_scraped(supabase: Any) -> set[str]:
+    cutoff = (date.today() - timedelta(days=30)).isoformat()
+    place_ids: set[str] = set()
+    page_size = 1000
+    offset = 0
+
+    while True:
+        result = (
+            supabase.table("contact_enrichments")
+            .select("place_id")
+            .gte("scrape_date", cutoff)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        place_ids.update(row["place_id"] for row in batch if row.get("place_id"))
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    return place_ids
 
 
 def fetch_contacts(api_key: str, website: str) -> tuple[dict[str, Any] | None, Any]:
@@ -88,19 +140,25 @@ def first_or_none(values: Any) -> Any:
 
 
 def build_upsert_row(row: dict[str, Any], contact_data: dict[str, Any] | None, raw_response: Any) -> dict[str, Any]:
+    emails = (contact_data or {}).get("emails") or []
+    phones = (contact_data or {}).get("phones") or []
+    socials = (contact_data or {}).get("socials") or {}
+
     return {
         "raw_ingestion_id": row.get("raw_ingestion_id"),
         "slug": row.get("slug"),
+        "place_id": row.get("place_id"),
         "website": row.get("website"),
-        "email": None,
-        "phone": None,
-        "instagram": None,
-        "facebook": None,
-        "tiktok": None,
-        "twitter": None,
-        "linkedin": None,
+        "email": first_or_none([e.get("value") for e in emails if e.get("value")]),
+        "phone": first_or_none([p.get("value") for p in phones if p.get("value")]),
+        "instagram": socials.get("instagram"),
+        "facebook": socials.get("facebook"),
+        "tiktok": socials.get("tiktok"),
+        "twitter": socials.get("twitter"),
+        "linkedin": socials.get("linkedin"),
         "raw_response": raw_response,
         "scraped_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "scrape_date": date.today().isoformat(),
     }
 
 
@@ -124,6 +182,14 @@ def main() -> int:
         target = args.slug or "all restaurants"
         print(f"⚠️ No restaurants found for {target}")
         return 0
+
+    if args.all:
+        recently_scraped = fetch_recently_scraped(supabase)
+        before = len(restaurants)
+        restaurants = [r for r in restaurants if r.get("place_id") not in recently_scraped]
+        skipped = before - len(restaurants)
+        if skipped:
+            print(f"⏭️  Skipping {skipped} restaurants scraped within the last 30 days")
 
     scraped = 0
     errors = 0
