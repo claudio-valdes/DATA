@@ -7,7 +7,7 @@ Usage:
 Required env vars:
     APIFY_TOKEN
     NEXT_PUBLIC_SUPABASE_URL
-    NEXT_PUBLIC_SUPABASE_ANON_KEY
+    SERVICE_ROLE_KEY
 """
 
 import os
@@ -21,7 +21,7 @@ from supabase import create_client
 load_dotenv(".env.local")
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_KEY = os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+SUPABASE_KEY = os.environ["SERVICE_ROLE_KEY"]
 APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
 

@@ -8,7 +8,7 @@ Usage:
 Required env vars:
     APIFY_TOKEN
     SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or NEXT_PUBLIC_SUPABASE_ANON_KEY)
+    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
 import argparse
@@ -23,7 +23,7 @@ from supabase import create_client
 load_dotenv(".env.local")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL") or os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or os.environ["SERVICE_ROLE_KEY"]
 APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
 
@@ -37,6 +37,27 @@ def parse_args() -> argparse.Namespace:
         parser.error("Use exactly one of --slug or --all")
 
     return args
+
+
+def fetch_tier_map(supabase) -> dict[str, int]:
+    tier_map: dict[str, int] = {}
+    page_size = 1000
+    offset = 0
+    while True:
+        result = (
+            supabase.table("restaurant_pipeline")
+            .select("place_id, tier")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        for row in batch:
+            if row.get("place_id") and row.get("tier") is not None:
+                tier_map[row["place_id"]] = row["tier"]
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return tier_map
 
 
 def fetch_restaurants(supabase, slug: str | None) -> list[dict]:
@@ -90,6 +111,14 @@ def main():
         target = args.slug or "all restaurants"
         print(f"⚠️ No restaurants with TikTok handle found for {target}")
         sys.exit(0)
+
+    if args.all:
+        tier_map = fetch_tier_map(supabase)
+        before = len(restaurants)
+        restaurants = [r for r in restaurants if tier_map.get(r["restaurant_id"], 1) >= 3]
+        skipped = before - len(restaurants)
+        if skipped:
+            print(f"⏭️  Skipping {skipped} restaurants below Tier 3")
 
     print(f"Processing {len(restaurants)} restaurants...")
 

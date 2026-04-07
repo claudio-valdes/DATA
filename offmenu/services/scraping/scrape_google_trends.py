@@ -26,7 +26,7 @@ def load_environment() -> tuple[str, str, str]:
 
     serpapi_key = os.getenv("SERPAPI_KEY")
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SERVICE_ROLE_KEY")
 
     missing = []
     if not serpapi_key:

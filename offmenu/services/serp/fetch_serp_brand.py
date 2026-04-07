@@ -4,7 +4,7 @@ Stores raw SerpAPI JSON in bronze_serp with query_type='brand'.
 
 Required env vars:
     NEXT_PUBLIC_SUPABASE_URL
-    NEXT_PUBLIC_SUPABASE_ANON_KEY
+    SERVICE_ROLE_KEY
     SERPAPI_KEY
 
 Usage:
@@ -20,7 +20,7 @@ from supabase import create_client
 load_dotenv(".env.local")
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_KEY = os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+SUPABASE_KEY = os.environ["SERVICE_ROLE_KEY"]
 SERPAPI_KEY = os.environ["SERPAPI_KEY"]
 
 

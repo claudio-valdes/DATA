@@ -5,3 +5,5 @@ httpx
 outscraper
 serpapi
 apify-client
+voyageai
+anthropic

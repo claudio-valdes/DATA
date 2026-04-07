@@ -10,7 +10,13 @@ from outscraper import ApiClient
 from supabase import create_client
 
 
-REVIEWS_LIMIT = 100
+REVIEWS_LIMIT_BY_TIER: dict[int, int] = {
+    1: 20,
+    2: 50,
+    3: 100,
+    4: 100,
+}
+REVIEWS_LIMIT_DEFAULT = 20
 
 
 def load_environment() -> tuple[str, str, str]:
@@ -18,7 +24,7 @@ def load_environment() -> tuple[str, str, str]:
 
     outscraper_key = os.getenv("OUTSCRAPER_API_KEY")
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SERVICE_ROLE_KEY")
 
     missing = []
     if not outscraper_key:
@@ -44,6 +50,28 @@ def parse_args() -> argparse.Namespace:
         parser.error("Use exactly one of --slug or --all")
 
     return args
+
+
+def fetch_tier_map(supabase: Any) -> dict[str, int]:
+    """Returns {place_id: tier} for all restaurants in restaurant_pipeline."""
+    tier_map: dict[str, int] = {}
+    page_size = 1000
+    offset = 0
+    while True:
+        result = (
+            supabase.table("restaurant_pipeline")
+            .select("place_id, tier")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        batch = result.data or []
+        for row in batch:
+            if row.get("place_id") and row.get("tier") is not None:
+                tier_map[row["place_id"]] = row["tier"]
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return tier_map
 
 
 def fetch_restaurants(supabase: Any, slug: str | None) -> list[dict[str, Any]]:
@@ -101,10 +129,10 @@ def fetch_recently_scraped_restaurants(supabase: Any) -> set[str]:
     return restaurant_ids
 
 
-def fetch_reviews(client: ApiClient, place_id: str) -> list[dict[str, Any]]:
+def fetch_reviews(client: ApiClient, place_id: str, reviews_limit: int) -> list[dict[str, Any]]:
     results = client.google_maps_reviews(
         place_id,
-        reviews_limit=REVIEWS_LIMIT,
+        reviews_limit=reviews_limit,
         language=["en", "de"],
     )
 
@@ -153,6 +181,7 @@ def main() -> int:
     client = ApiClient(api_key=outscraper_key)
     supabase = create_client(supabase_url, supabase_key)
     restaurants = fetch_restaurants(supabase, args.slug)
+    tier_map = fetch_tier_map(supabase)
     scraped_at = datetime.now(timezone.utc)
 
     if not restaurants:
@@ -177,8 +206,11 @@ def main() -> int:
         place_id = restaurant["place_id"]
         restaurant_id = restaurant["id"]
 
+        tier = tier_map.get(place_id, 1)
+        reviews_limit = REVIEWS_LIMIT_BY_TIER.get(tier, REVIEWS_LIMIT_DEFAULT)
+
         try:
-            reviews = fetch_reviews(client, place_id)
+            reviews = fetch_reviews(client, place_id, reviews_limit)
 
             if not reviews:
                 print(f"⚠️ {slug} → no reviews found")
@@ -203,7 +235,7 @@ def main() -> int:
                     print(f"  ✗ {slug} → row upsert failed: {row_error}")
 
             total_upserted += upserted
-            print(f"✓ {slug} → {upserted}/{len(rows)} reviews upserted")
+            print(f"✓ {slug} (tier {tier}, limit {reviews_limit}) → {upserted}/{len(rows)} reviews upserted")
 
         except Exception as error:
             errors += 1

@@ -17,7 +17,7 @@ def load_environment() -> tuple[str, str]:
     load_dotenv(".env.local")
 
     supabase_url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    supabase_key = os.getenv("SUPABASE_KEY") or os.getenv("SERVICE_ROLE_KEY")
 
     missing = []
     if not supabase_url:

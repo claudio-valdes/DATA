@@ -3,7 +3,7 @@ Extract structured signals from bronze_serp into silver_search_visibility.
 
 Required env vars:
     NEXT_PUBLIC_SUPABASE_URL
-    NEXT_PUBLIC_SUPABASE_ANON_KEY
+    SERVICE_ROLE_KEY
 
 Usage:
     python scripts/match_serp.py
@@ -16,7 +16,7 @@ from supabase import create_client
 load_dotenv(".env.local")
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_KEY = os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+SUPABASE_KEY = os.environ["SERVICE_ROLE_KEY"]
 
 BATCH_SIZE = 100
 

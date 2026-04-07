@@ -20,7 +20,7 @@ from supabase import create_client
 load_dotenv(".env.local")
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+SUPABASE_KEY = os.environ.get("SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("ERROR: SUPABASE_URL and SUPABASE_KEY must be set.")
