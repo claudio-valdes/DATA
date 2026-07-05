@@ -10,7 +10,7 @@ Score components (0-1 each):
   - Quality            10%  rating from silver_restaurants
 
 Usage:
-    python entrypoints/score_sales_pipeline.py
+    python -m entrypoints.score_sales_pipeline
 """
 
 import math
@@ -93,12 +93,60 @@ def compute_sales_score(
     return round(score, 4)
 
 
-def main() -> int:
-    try:
-        supabase = get_client()
-    except RuntimeError as error:
-        print(f"❌ {error}")
-        return 1
+def score_one(place_id: str) -> dict:
+    """Recompute sales_score for a single restaurant. Returns the new score."""
+    supabase = get_client()
+
+    pipeline_result = supabase.table("restaurant_pipeline").select("score_band").eq("place_id", place_id).execute()
+    pipeline_row = (pipeline_result.data or [{}])[0]
+
+    restaurant_result = supabase.table("silver_restaurants").select("rating").eq("place_id", place_id).execute()
+    restaurant_row = (restaurant_result.data or [{}])[0]
+
+    contact_result = supabase.table("contact_enrichments").select("email, phone").eq("place_id", place_id).execute()
+    contact_row = (contact_result.data or [{}])[0]
+
+    handles_result = (
+        supabase.table("restaurant_social_handles")
+        .select("ig_handle, tiktok_handle")
+        .eq("restaurant_id", place_id)
+        .execute()
+    )
+    handles_row = (handles_result.data or [{}])[0]
+
+    mentions_result = (
+        supabase.table("silver_social_mentions")
+        .select("post_plays")
+        .eq("place_id", place_id)
+        .eq("is_restaurant_mention", True)
+        .execute()
+    )
+    mention_rows = mentions_result.data or []
+
+    score = compute_sales_score(
+        mentions=len(mention_rows),
+        total_plays=sum(m.get("post_plays") or 0 for m in mention_rows),
+        score_band=pipeline_row.get("score_band"),
+        has_email=bool(contact_row.get("email")),
+        has_phone=bool(contact_row.get("phone")),
+        has_ig=bool(handles_row.get("ig_handle")),
+        has_tiktok=bool(handles_row.get("tiktok_handle")),
+        rating=restaurant_row.get("rating"),
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.table("restaurant_pipeline").update({
+        "sales_score": score,
+        "sales_score_updated_at": now,
+    }).eq("place_id", place_id).execute()
+
+    print(f"✓ {place_id} → sales_score: {score}")
+    return {"place_id": place_id, "sales_score": score}
+
+
+def score_all() -> dict:
+    """Recompute sales_score for every restaurant in restaurant_pipeline. Returns summary counts."""
+    supabase = get_client()
 
     print("Fetching data...")
 
@@ -173,6 +221,15 @@ def main() -> int:
 
     print("---")
     print(f"Scored: {updated} restaurants")
+    return {"scored": updated}
+
+
+def main() -> int:
+    try:
+        score_all()
+    except RuntimeError as error:
+        print(f"❌ {error}")
+        return 1
     return 0
 
 

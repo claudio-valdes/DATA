@@ -1,21 +1,9 @@
 """
 Scrape TikTok and Instagram for Berlin restaurant discovery content.
 Results land in bronze_social_posts for agent processing.
-
-Usage:
-    python services/discovery/scrape_social_discovery.py --platform tiktok
-    python services/discovery/scrape_social_discovery.py --platform instagram
-    python services/discovery/scrape_social_discovery.py --platform both
-
-Required env vars:
-    APIFY_TOKEN
-    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
-import argparse
 import os
-import sys
 import time
 from datetime import datetime, timezone
 
@@ -68,17 +56,6 @@ INSTAGRAM_HASHTAGS = [
 ]
 
 RESULTS_PER_QUERY = 30
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape TikTok and IG for Berlin restaurant discovery")
-    parser.add_argument(
-        "--platform",
-        choices=["tiktok", "instagram", "both"],
-        required=True,
-        help="Platform to scrape",
-    )
-    return parser.parse_args()
 
 
 def run_apify_actor(actor_id: str, input_payload: dict) -> list:
@@ -216,14 +193,14 @@ def scrape_instagram_hashtag(supabase, hashtag: str) -> tuple[int, int]:
     return upserted, errors
 
 
-def main() -> int:
-    args = parse_args()
+def scrape(platform: str = "both") -> dict:
+    """Scrape TikTok and/or Instagram (platform: "tiktok", "instagram", or "both") into bronze_social_posts."""
     supabase = get_client()
 
     total_upserted = 0
     total_errors = 0
 
-    if args.platform in ("tiktok", "both"):
+    if platform in ("tiktok", "both"):
         print(f"TikTok hashtags ({len(TIKTOK_HASHTAGS)})...")
         for hashtag in TIKTOK_HASHTAGS:
             u, e = scrape_tiktok_hashtag(supabase, hashtag)
@@ -238,7 +215,7 @@ def main() -> int:
             total_errors += e
             time.sleep(2)
 
-    if args.platform in ("instagram", "both"):
+    if platform in ("instagram", "both"):
         print(f"\nInstagram hashtags ({len(INSTAGRAM_HASHTAGS)})...")
         for hashtag in INSTAGRAM_HASHTAGS:
             u, e = scrape_instagram_hashtag(supabase, hashtag)
@@ -248,8 +225,4 @@ def main() -> int:
 
     print("---")
     print(f"Total upserted: {total_upserted} | Errors: {total_errors}")
-    return 0 if total_errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"upserted": total_upserted, "errors": total_errors}

@@ -1,14 +1,6 @@
 """
 Run brand queries ("{restaurant name} berlin") for every target account with a place_id.
 Stores raw SerpAPI JSON in bronze_serp with query_type='brand'.
-
-Required env vars:
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
-    SERPAPI_KEY
-
-Usage:
-    python services/serp/fetch_serp_brand.py
 """
 
 import os
@@ -35,7 +27,22 @@ def fetch_serp(query: str) -> dict:
     return resp.json()
 
 
-def main():
+def run_brand_query_for_restaurant(place_id: str, name: str) -> dict:
+    """Run a single brand SERP query for one restaurant, bypassing target_accounts entirely."""
+    supabase = get_client()
+    query = f"{name} berlin"
+    result = fetch_serp(query)
+    supabase.table("bronze_serp").upsert({
+        "query": query,
+        "query_type": "brand",
+        "place_id": place_id,
+        "raw_json": result,
+    }, on_conflict="query,fetched_at::DATE").execute()
+    return {"query": query}
+
+
+def run_brand_queries() -> dict:
+    """Run a brand SERP query for every target account with a place_id. Returns summary counts."""
     supabase = get_client()
 
     r = supabase.table("target_accounts") \
@@ -63,7 +70,4 @@ def main():
             continue
 
     print(f"\n✓ Brand queries complete: {len(accounts)}")
-
-
-if __name__ == "__main__":
-    main()
+    return {"accounts_queried": len(accounts)}

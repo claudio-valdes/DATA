@@ -7,18 +7,9 @@ For each unique unmatched restaurant name:
   3a. place_id already in silver_restaurants → link mention
   3b. place_id not in silver_restaurants → insert to raw_ingestions for normal pipeline
   3c. Not a restaurant or not found → mark accordingly
-
-Usage:
-    python services/discovery/enrich_unmatched_mentions.py
-
-Required env vars:
-    OUTSCRAPER_API_KEY
-    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
 import os
-import sys
 import time
 from typing import Any
 
@@ -137,7 +128,8 @@ def update_mentions_bulk(
     }).in_("id", mention_ids).execute()
 
 
-def main() -> int:
+def enrich() -> dict:
+    """Enrich unmatched silver_social_mentions by querying OutScraper Google Maps. Returns summary counts."""
     client = ApiClient(api_key=OUTSCRAPER_KEY)
     supabase = get_client()
 
@@ -146,7 +138,7 @@ def main() -> int:
 
     if not mentions:
         print("Nothing to do.")
-        return 0
+        return {"linked": 0, "new_discoveries": 0, "not_restaurant": 0, "unresolved": 0}
 
     known_place_ids = fetch_known_place_ids(supabase)
     groups = group_by_name(mentions)
@@ -196,8 +188,9 @@ def main() -> int:
     print(f"New discoveries added to pipeline: {new_discoveries}")
     print(f"Not a restaurant: {not_restaurant}")
     print(f"Unresolved (not found): {unresolved}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {
+        "linked": linked,
+        "new_discoveries": new_discoveries,
+        "not_restaurant": not_restaurant,
+        "unresolved": unresolved,
+    }

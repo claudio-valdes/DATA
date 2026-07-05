@@ -1,19 +1,8 @@
 """
 Fetch Instagram profile + posts + hashtag posts for a restaurant via Apify.
-
-Usage:
-    python services/instagram/fetch_ig_social.py --slug <slug>
-    python services/instagram/fetch_ig_social.py --all
-
-Required env vars:
-    APIFY_TOKEN
-    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
-import argparse
 import os
-import sys
 import time
 from datetime import date, datetime, timezone
 
@@ -33,18 +22,6 @@ BERLIN_HASHTAGS = [
     "chinesefoodberlin",
     "berlinasianfood",
 ]
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch Instagram profiles and posts via Apify")
-    parser.add_argument("--slug", help="Process one restaurant by slug")
-    parser.add_argument("--all", action="store_true", help="Process all restaurants with an IG handle")
-    args = parser.parse_args()
-
-    if bool(args.slug) == bool(args.all):
-        parser.error("Use exactly one of --slug or --all")
-
-    return args
 
 
 def fetch_tier_map(supabase) -> dict[str, int]:
@@ -173,17 +150,17 @@ def upsert_hashtag_posts(supabase, hashtag: str, items: list) -> int:
     return len(records)
 
 
-def main():
-    args = parse_args()
+def fetch_social(slug: str | None = None) -> dict:
+    """Fetch IG profile/posts for one restaurant (slug) or all Tier 3+ restaurants with an IG handle (slug=None)."""
     supabase = get_client()
-    restaurants = fetch_restaurants(supabase, args.slug)
+    restaurants = fetch_restaurants(supabase, slug)
 
     if not restaurants:
-        target = args.slug or "all restaurants"
+        target = slug or "all restaurants"
         print(f"⚠️ No restaurants with IG handle found for {target}")
-        sys.exit(0)
+        return {"scraped": 0, "errors": 0, "hashtag_posts": 0}
 
-    if args.all:
+    if slug is None:
         tier_map = fetch_tier_map(supabase)
         before = len(restaurants)
         restaurants = [r for r in restaurants if tier_map.get(r["restaurant_id"], 1) >= 3]
@@ -236,8 +213,4 @@ def main():
             print(f"  ✗ #{hashtag} → {e}")
 
     print(f"Hashtag posts upserted: {total_hashtag_posts}")
-    return 0 if errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"scraped": scraped, "errors": errors, "hashtag_posts": total_hashtag_posts}

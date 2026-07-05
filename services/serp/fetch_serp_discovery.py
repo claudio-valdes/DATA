@@ -1,14 +1,6 @@
 """
 Run discovery + category queries against SerpAPI, store raw JSON in bronze_serp,
 and auto-add top 10 results to target_accounts.
-
-Required env vars:
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
-    SERPAPI_KEY
-
-Usage:
-    python services/serp/fetch_serp_discovery.py
 """
 
 import os
@@ -83,7 +75,8 @@ def auto_add_from_local_pack(supabase, serp_json: dict, query: str, query_type: 
             print(f"  Could not add {name}: {e}")
 
 
-def main():
+def run_discovery_queries() -> dict:
+    """Run discovery + category queries, store raw results, and auto-add top local-pack hits. Returns summary counts."""
     supabase = get_client()
 
     queries = build_discovery_queries(supabase)
@@ -111,7 +104,4 @@ def main():
     r = supabase.table("target_accounts").select("id", count="exact").execute()
     print(f"\n✓ bronze_serp queries stored: {len(queries)}")
     print(f"✓ target_accounts total:      {r.count}")
-
-
-if __name__ == "__main__":
-    main()
+    return {"queries_run": len(queries), "target_accounts_total": r.count}

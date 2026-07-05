@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """
 Embed silver_restaurants using Voyage AI and store vectors in silver_restaurants.embedding.
-Skips restaurants that already have an embedding unless --force is passed.
-
-Usage:
-    python entrypoints/embed_silver_restaurants.py
-    python entrypoints/embed_silver_restaurants.py --force
+Skips restaurants that already have an embedding unless force=True.
 """
 
-import argparse
 import os
-import sys
 from typing import Any
 
 import voyageai
@@ -19,12 +13,6 @@ from repository.db import get_client, paginate
 
 EMBEDDING_MODEL = "voyage-3-lite"
 BATCH_SIZE = 128
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Embed silver_restaurants with Voyage AI")
-    parser.add_argument("--force", action="store_true", help="Re-embed all, including those with existing embeddings")
-    return parser.parse_args()
 
 
 def fetch_restaurants(supabase: Any, force: bool) -> list[dict[str, Any]]:
@@ -42,24 +30,19 @@ def build_embedding_text(restaurant: dict[str, Any]) -> str:
     return f"Restaurant: {restaurant['name']}, Berlin, Germany"
 
 
-def main() -> int:
-    args = parse_args()
-
-    try:
-        voyage_key = os.environ["VOYAGE_KEY"]
-        supabase = get_client()
-    except (KeyError, RuntimeError) as error:
-        print(f"❌ {error}")
-        return 1
+def embed(force: bool = False) -> dict:
+    """Embed silver_restaurants missing an embedding (or all, if force=True) via Voyage AI. Returns summary counts."""
+    voyage_key = os.environ["VOYAGE_KEY"]
+    supabase = get_client()
 
     voyage = voyageai.Client(api_key=voyage_key)
 
-    restaurants = fetch_restaurants(supabase, args.force)
+    restaurants = fetch_restaurants(supabase, force)
     print(f"Restaurants to embed: {len(restaurants)}")
 
     if not restaurants:
         print("Nothing to do.")
-        return 0
+        return {"embedded": 0, "errors": 0}
 
     embedded = 0
     errors = 0
@@ -90,8 +73,4 @@ def main() -> int:
 
     print("---")
     print(f"Embedded: {embedded} | Errors: {errors}")
-    return 0 if errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"embedded": embedded, "errors": errors}

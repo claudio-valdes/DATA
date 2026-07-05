@@ -5,7 +5,6 @@ Reads all rows from raw_ingestions, extracts core fields from raw_data,
 and upserts into silver_restaurants on conflict of place_id.
 """
 
-import sys
 from typing import Any
 
 from repository.db import fetch_all, get_client
@@ -36,12 +35,9 @@ def build_silver_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def main() -> int:
-    try:
-        supabase = get_client()
-    except RuntimeError as error:
-        print(f"❌ {error}")
-        return 1
+def transform() -> dict:
+    """Transform raw_ingestions into silver_restaurants. Returns summary counts."""
+    supabase = get_client()
 
     print("Fetching raw_ingestions...")
     raws = fetch_raw_ingestions(supabase)
@@ -69,8 +65,4 @@ def main() -> int:
 
     print("---")
     print(f"Upserted: {upserted} | Errors: {errors}")
-    return 0 if errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"upserted": upserted, "errors": errors}

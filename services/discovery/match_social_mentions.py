@@ -3,19 +3,9 @@ Match silver_social_mentions against silver_restaurants using:
   1. Exact handle match  → restaurant_social_handles
   2. Exact name match    → silver_restaurants.name
   3. Vector shortlist + agent validation → silver_restaurants.embedding + Claude Haiku
-
-Usage:
-    python services/discovery/match_social_mentions.py
-
-Required env vars:
-    VOYAGE_KEY
-    ANTHROPIC_KEY
-    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
 import os
-import sys
 from typing import Any
 
 import anthropic
@@ -171,7 +161,8 @@ def group_by_name(mentions: list[dict[str, Any]]) -> dict[str, list[dict[str, An
     return groups
 
 
-def main() -> int:
+def match_mentions() -> dict:
+    """Match unmatched silver_social_mentions to silver_restaurants. Returns summary counts."""
     voyage = voyageai.Client(api_key=VOYAGE_KEY)
     ai_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     supabase = get_client()
@@ -181,7 +172,7 @@ def main() -> int:
 
     if not mentions:
         print("Nothing to do.")
-        return 0
+        return {"matched": 0, "needs_review": 0}
 
     handle_map = fetch_handle_map(supabase)
     name_map = fetch_name_map(supabase)
@@ -256,8 +247,10 @@ def main() -> int:
     print("---")
     print(f"Matched: {total_matched} (handle: {handle_matched}, exact: {name_matched}, agent: {agent_matched})")
     print(f"Needs review: {needs_review}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {
+        "matched": total_matched,
+        "handle_matched": handle_matched,
+        "name_matched": name_matched,
+        "agent_matched": agent_matched,
+        "needs_review": needs_review,
+    }

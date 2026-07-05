@@ -1,22 +1,11 @@
 """
 Process unprocessed bronze_social_posts through Claude Haiku to extract restaurant mentions.
 Results land in silver_social_mentions. Posts are marked processed=true when done.
-
-Usage:
-    python services/discovery/extract_social_mentions.py
-    python services/discovery/extract_social_mentions.py --limit 100
-
-Required env vars:
-    ANTHROPIC_KEY
-    SUPABASE_URL  (or NEXT_PUBLIC_SUPABASE_URL)
-    SUPABASE_KEY  (or SERVICE_ROLE_KEY)
 """
 
-import argparse
 import asyncio
 import json
 import os
-import sys
 from typing import Any
 
 import anthropic
@@ -65,12 +54,6 @@ Rules:
 - Only include real named restaurants — not markets, food halls, or generic food spots unless named
 - neighbourhood: use Berlin neighbourhood names (Mitte, Kreuzberg, Prenzlauer Berg, Neukölln, etc.)
 - social_handle: only the restaurant's own handle, never the post author"""
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract restaurant mentions from bronze_social_posts")
-    parser.add_argument("--limit", type=int, default=500, help="Max posts to process in one run (default: 500)")
-    return parser.parse_args()
 
 
 def fetch_unprocessed_posts(supabase: Any, limit: int) -> list[dict[str, Any]]:
@@ -168,17 +151,17 @@ async def extract_one(
             return post, []
 
 
-async def run(args: argparse.Namespace) -> int:
+async def _extract_mentions(limit: int) -> dict:
     client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)
     supabase = get_client()
     semaphore = asyncio.Semaphore(CONCURRENCY)
 
-    posts = fetch_unprocessed_posts(supabase, args.limit)
+    posts = fetch_unprocessed_posts(supabase, limit)
     print(f"Unprocessed posts to extract: {len(posts)}")
 
     if not posts:
         print("Nothing to do.")
-        return 0
+        return {"processed": 0, "mentions_found": 0, "errors": 0}
 
     tasks = [extract_one(client, post, semaphore) for post in posts]
 
@@ -215,13 +198,9 @@ async def run(args: argparse.Namespace) -> int:
 
     print("---")
     print(f"Posts processed: {extracted} | Restaurant mentions found: {mentions_found} | Errors: {errors}")
-    return 0 if errors == 0 else 1
+    return {"processed": extracted, "mentions_found": mentions_found, "errors": errors}
 
 
-def main() -> int:
-    args = parse_args()
-    return asyncio.run(run(args))
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+def extract_mentions(limit: int = 500) -> dict:
+    """Extract restaurant mentions from unprocessed bronze_social_posts via Claude Haiku. Returns summary counts."""
+    return asyncio.run(_extract_mentions(limit))

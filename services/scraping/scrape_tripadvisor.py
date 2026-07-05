@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
-import argparse
 import os
 import re
-import sys
 import time
 from typing import Any
 
@@ -12,18 +10,6 @@ from serpapi import GoogleSearch
 from repository.db import get_client, paginate
 
 TRIPADVISOR_DOMAIN = "www.tripadvisor.com"
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape TripAdvisor details and reviews via Google Search discovery")
-    parser.add_argument("--slug", help="Only process one restaurant slug")
-    parser.add_argument("--all", action="store_true", help="Process all restaurants")
-    args = parser.parse_args()
-
-    if bool(args.slug) == bool(args.all):
-        parser.error("Use exactly one of --slug or --all")
-
-    return args
 
 
 def fetch_restaurants(supabase: Any, slug: str | None) -> list[dict[str, Any]]:
@@ -216,22 +202,17 @@ def format_summary(slug: str, row: dict[str, Any]) -> str:
     )
 
 
-def main() -> int:
-    args = parse_args()
+def scrape_tripadvisor(slug: str | None = None) -> dict:
+    """Scrape TripAdvisor details for one restaurant (slug) or all restaurants (slug=None)."""
+    serpapi_key = os.environ["SERPAPI_KEY"]
+    supabase = get_client()
 
-    try:
-        serpapi_key = os.environ["SERPAPI_KEY"]
-        supabase = get_client()
-    except (KeyError, RuntimeError) as error:
-        print(f"❌ {error}")
-        return 1
-
-    restaurants = fetch_restaurants(supabase, args.slug)
+    restaurants = fetch_restaurants(supabase, slug)
 
     if not restaurants:
-        target = args.slug or "all restaurants"
+        target = slug or "all restaurants"
         print(f"⚠️ No restaurants found for {target}")
-        return 0
+        return {"scraped": 0, "errors": 0}
 
     scraped = 0
     errors = 0
@@ -301,8 +282,4 @@ def main() -> int:
 
     print("---")
     print(f"Done: {scraped}/{len(restaurants)} scraped, {errors} errors")
-    return 0 if errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"scraped": scraped, "errors": errors}

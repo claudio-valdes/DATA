@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
-import argparse
 import os
-import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -99,21 +97,6 @@ PROFILE_FIELDS = [
     "logo",
     "photo",
 ]
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bulk scrape Berlin restaurant profiles into raw_ingestions")
-    parser.add_argument("--query", help="Run a single query")
-    parser.add_argument("--neighbourhoods", action="store_true", help="Run all neighbourhood queries")
-    parser.add_argument("--labels", action="store_true", help="Run all label-based queries")
-    parser.add_argument("--all", action="store_true", help="Run all queries")
-    args = parser.parse_args()
-
-    selected = sum(bool(value) for value in [args.query, args.neighbourhoods, args.labels, args.all])
-    if selected != 1:
-        parser.error("Use exactly one of --query, --neighbourhoods, --labels, or --all")
-
-    return args
 
 
 def flatten_results(results: Any) -> list[dict[str, Any]]:
@@ -234,14 +217,19 @@ def upsert_raw_ingestion(supabase: Any, query: str, restaurant: dict[str, Any]) 
     return True
 
 
-def selected_queries(args: argparse.Namespace, supabase: Any) -> list[str]:
-    if args.query:
-        return [args.query]
-    if args.neighbourhoods:
+def selected_queries(
+    supabase: Any,
+    query: str | None = None,
+    neighbourhoods_only: bool = False,
+    labels_only: bool = False,
+) -> list[str]:
+    if query:
+        return [query]
+    if neighbourhoods_only:
         queries = [f"restaurants in {n} Berlin" for n in NEIGHBOURHOODS]
         queries.append(POTSDAM_QUERY)
         return queries
-    if args.labels:
+    if labels_only:
         response = (
             supabase.table("silver_labels")
             .select("label_value, label_type")
@@ -259,18 +247,22 @@ def selected_queries(args: argparse.Namespace, supabase: Any) -> list[str]:
     return build_query_list(supabase)
 
 
-def main() -> int:
-    args = parse_args()
+def search_restaurants(
+    query: str | None = None,
+    neighbourhoods_only: bool = False,
+    labels_only: bool = False,
+) -> dict:
+    """Search Google Maps (via Outscraper) for restaurants and upsert results into raw_ingestions.
 
-    try:
-        outscraper_key = os.environ["OUTSCRAPER_API_KEY"]
-        supabase = get_client()
-    except (KeyError, RuntimeError) as error:
-        print(f"❌ {error}")
-        return 1
+    With no arguments, runs the full sweep (all neighbourhoods + all labels + neighbourhood x
+    occasion combos). Pass `query` for a single ad-hoc query, or set `neighbourhoods_only` /
+    `labels_only` to run just that subset.
+    """
+    outscraper_key = os.environ["OUTSCRAPER_API_KEY"]
+    supabase = get_client()
 
     client = ApiClient(api_key=outscraper_key)
-    queries = selected_queries(args, supabase)
+    queries = selected_queries(supabase, query=query, neighbourhoods_only=neighbourhoods_only, labels_only=labels_only)
     scraped_at = datetime.now(timezone.utc)
 
     print(f"Queries to run: {len(queries)}")
@@ -342,8 +334,10 @@ def main() -> int:
     print(f"Upserts attempted: {total_upserts}")
     print(f"Duplicates skipped in run: {duplicates_in_run}")
     print(f"Errors: {errors}")
-    return 0 if errors == 0 else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {
+        "queries_run": len(queries),
+        "restaurants_found": total_found,
+        "upserts": total_upserts,
+        "duplicates_skipped": duplicates_in_run,
+        "errors": errors,
+    }

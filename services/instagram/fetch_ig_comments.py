@@ -1,23 +1,14 @@
 """
 Fetch Instagram comments for all posts belonging to a restaurant via Apify.
-
-Usage:
-    python services/instagram/fetch_ig_comments.py <restaurant_id>
-
-Required env vars:
-    APIFY_TOKEN
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
 """
 
 import os
-import sys
 import time
 from datetime import datetime, timezone
 
 import httpx
 
-from repository.db import get_client
+from repository.db import get_client, paginate
 
 APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
@@ -107,18 +98,14 @@ def flatten_comments(post_id: str, restaurant_id: str, ig_handle: str, items: li
     return rows
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python fetch_ig_comments.py <restaurant_id>")
-        sys.exit(1)
-
-    restaurant_id = sys.argv[1]
+def fetch_comments(restaurant_id: str) -> dict:
+    """Fetch IG comments for all commentable posts of a single restaurant. Returns summary counts."""
     supabase = get_client()
 
     ig_handle = get_ig_handle(supabase, restaurant_id)
     if not ig_handle:
         print(f"No Instagram handle found for restaurant_id={restaurant_id}. Exiting.")
-        sys.exit(0)
+        return {"comments_upserted": 0}
 
     posts = get_posts_for_comments(supabase, restaurant_id)
     print(f"Found {len(posts)} posts with comments for @{ig_handle}")
@@ -151,7 +138,17 @@ def main():
             continue
 
     print(f"\n✓ Total comments/replies upserted: {total_comments}")
+    return {"comments_upserted": total_comments}
 
 
-if __name__ == "__main__":
-    main()
+def fetch_comments_for_all() -> dict:
+    """Fetch IG comments for every restaurant that has an IG handle. Returns summary counts."""
+    supabase = get_client()
+    rows = paginate(
+        lambda sb: sb.table("restaurant_social_handles").select("restaurant_id, ig_handle").not_.is_("ig_handle", "null")
+    )
+    total_comments = 0
+    for row in rows:
+        result = fetch_comments(row["restaurant_id"])
+        total_comments += result["comments_upserted"]
+    return {"comments_upserted": total_comments}

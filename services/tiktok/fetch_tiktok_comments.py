@@ -1,23 +1,14 @@
 """
 Fetch TikTok comments for all posts belonging to a restaurant via Apify.
-
-Usage:
-    python services/tiktok/fetch_tiktok_comments.py <restaurant_id>
-
-Required env vars:
-    APIFY_TOKEN
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
 """
 
 import os
-import sys
 import time
 from datetime import datetime, timezone
 
 import httpx
 
-from repository.db import get_client
+from repository.db import get_client, paginate
 
 APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
@@ -49,18 +40,14 @@ def get_posts_for_comments(supabase, restaurant_id: str) -> list:
     return r.data or []
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python fetch_tiktok_comments.py <restaurant_id>")
-        sys.exit(1)
-
-    restaurant_id = sys.argv[1]
+def fetch_comments(restaurant_id: str) -> dict:
+    """Fetch TikTok comments for all commentable posts of a single restaurant. Returns summary counts."""
     supabase = get_client()
 
     tiktok_handle = get_tiktok_handle(supabase, restaurant_id)
     if not tiktok_handle:
         print(f"No TikTok handle found for restaurant_id={restaurant_id}. Exiting.")
-        sys.exit(0)
+        return {"comments_upserted": 0}
 
     posts = get_posts_for_comments(supabase, restaurant_id)
     print(f"Found {len(posts)} posts with comments for @{tiktok_handle}")
@@ -120,7 +107,17 @@ def main():
             continue
 
     print(f"\n✓ Total TikTok comments upserted: {total_comments}")
+    return {"comments_upserted": total_comments}
 
 
-if __name__ == "__main__":
-    main()
+def fetch_comments_for_all() -> dict:
+    """Fetch TikTok comments for every restaurant that has a TikTok handle. Returns summary counts."""
+    supabase = get_client()
+    rows = paginate(
+        lambda sb: sb.table("restaurant_social_handles").select("restaurant_id, tiktok_handle").not_.is_("tiktok_handle", "null")
+    )
+    total_comments = 0
+    for row in rows:
+        result = fetch_comments(row["restaurant_id"])
+        total_comments += result["comments_upserted"]
+    return {"comments_upserted": total_comments}

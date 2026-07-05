@@ -494,6 +494,27 @@ CREATE TABLE public.silver_restaurants (
 
 
 --
+-- Name: silver_search_visibility; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.silver_search_visibility (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    place_id text NOT NULL,
+    query text NOT NULL,
+    query_type text,
+    organic_position integer,
+    in_local_pack boolean DEFAULT false,
+    local_pack_position integer,
+    has_knowledge_panel boolean DEFAULT false,
+    knowledge_panel_rating numeric,
+    knowledge_panel_reviews integer,
+    total_results_estimate integer,
+    fetched_at timestamp with time zone,
+    fetched_date date
+);
+
+
+--
 -- Name: silver_social_mentions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -871,6 +892,22 @@ ALTER TABLE ONLY public.silver_restaurants
 
 ALTER TABLE ONLY public.silver_restaurants
     ADD CONSTRAINT silver_restaurants_place_id_unique UNIQUE (place_id);
+
+
+--
+-- Name: silver_search_visibility silver_search_visibility_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.silver_search_visibility
+    ADD CONSTRAINT silver_search_visibility_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: silver_search_visibility silver_search_visibility_place_id_query_fetched_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.silver_search_visibility
+    ADD CONSTRAINT silver_search_visibility_place_id_query_fetched_date_key UNIQUE (place_id, query, fetched_date);
 
 
 --

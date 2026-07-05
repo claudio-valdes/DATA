@@ -1,26 +1,12 @@
 """
 Extract structured labels from raw_ingestions into silver_labels (tall format).
 Enables clustering, eigenvector analysis, and neighbourhood/cuisine filtering.
-
-Required env vars:
-    SUPABASE_URL
-    SUPABASE_KEY  (service role key)
-
-Usage:
-    python entrypoints/extract_silver_labels.py
 """
 
 import re
-import sys
 from collections import defaultdict
 
 from repository.db import get_client
-
-try:
-    supabase = get_client()
-except RuntimeError as error:
-    print(f"ERROR: {error}")
-    sys.exit(1)
 
 BATCH_SIZE = 500
 
@@ -98,7 +84,7 @@ def extract_labels(row: dict) -> list[tuple[str, str, str]]:
     return labels
 
 
-def fetch_all_rows() -> list[dict]:
+def fetch_all_rows(supabase) -> list[dict]:
     """Paginate through raw_ingestions, returning all matching rows."""
     page_size = 1000
     offset = 0
@@ -123,9 +109,12 @@ def fetch_all_rows() -> list[dict]:
     return all_rows
 
 
-def main():
+def extract() -> dict:
+    """Extract structured labels from raw_ingestions and upsert into silver_labels. Returns summary counts."""
+    supabase = get_client()
+
     print("Fetching raw_ingestions...")
-    data_rows = fetch_all_rows()
+    data_rows = fetch_all_rows(supabase)
     print(f"Found {len(data_rows)} ingestion records.")
 
     all_records = []
@@ -178,7 +167,4 @@ def main():
     print(f"✓ Labels inserted/updated: {upserted:,}")
     for label_type, count in sorted(type_counts.items(), key=lambda x: -x[1]):
         print(f"  {label_type:<16} {count:>6,}")
-
-
-if __name__ == "__main__":
-    main()
+    return {"processed": processed, "skipped": skipped, "labels_upserted": upserted}

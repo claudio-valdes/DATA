@@ -1,13 +1,6 @@
 """
 Fetch all Berlin Wolt venues from the public API and upsert into bronze_wolt.
 Run weekly or whenever fresh scores/data are needed. Never called during matching.
-
-Required env vars:
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
-
-Usage:
-    python services/wolt/fetch_wolt_bronze.py
 """
 
 import time
@@ -52,7 +45,8 @@ def fetch_wolt_venues(lat: float, lon: float) -> list[dict]:
     return venues
 
 
-def main():
+def fetch_bronze() -> dict:
+    """Fetch all Berlin Wolt venues and upsert into bronze_wolt. Returns summary counts."""
     supabase = get_client()
 
     print("Fetching Wolt venues...")
@@ -94,7 +88,4 @@ def main():
 
     r = supabase.table("bronze_wolt").select("wolt_id", count="exact").execute()
     print(f"\n✓ bronze_wolt total rows: {r.count:,}")
-
-
-if __name__ == "__main__":
-    main()
+    return {"fetched": len(all_venues), "upserted": upserted, "bronze_wolt_rows": r.count}

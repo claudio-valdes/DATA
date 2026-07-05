@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
-import argparse
 import os
-import sys
 import time
 from collections import defaultdict
 from statistics import mean
@@ -18,18 +16,6 @@ MIN_RESTAURANT_COUNT = 5
 GEO = "DE"
 PERIOD = "today 12-m"
 TZ = "-60"
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape Google Trends data for restaurant labels from silver_labels")
-    parser.add_argument("--query", help="Run a single query (e.g. 'romantic restaurant')")
-    parser.add_argument("--all", action="store_true", help="Run all queries derived from silver_labels")
-    args = parser.parse_args()
-
-    if bool(args.query) == bool(args.all):
-        parser.error("Use exactly one of --query or --all")
-
-    return args
 
 
 def fetch_label_queries(supabase: Any) -> list[str]:
@@ -171,18 +157,13 @@ def format_summary(query: str, average_interest: int | None, trend_pct: float, d
     return f"✓ {query} → avg: {avg}, trend: {sign}{round(trend_pct, 1)}% ({direction}) {icon}"
 
 
-def main() -> int:
-    args = parse_args()
+def scrape_trends(query: str | None = None) -> dict:
+    """Scrape Google Trends for one query, or for every qualifying label derived from silver_labels (query=None)."""
+    serpapi_key = os.environ["SERPAPI_KEY"]
+    supabase = get_client()
 
-    try:
-        serpapi_key = os.environ["SERPAPI_KEY"]
-        supabase = get_client()
-    except (KeyError, RuntimeError) as error:
-        print(f"❌ {error}")
-        return 1
-
-    if args.query:
-        queries = [args.query]
+    if query:
+        queries = [query]
     else:
         queries = fetch_label_queries(supabase)
         print(f"Found {len(queries)} label queries from silver_labels")
@@ -205,8 +186,4 @@ def main() -> int:
 
     print("---")
     print(f"Done: {scraped}/{len(queries)} scraped")
-    return 0 if scraped == len(queries) else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return {"scraped": scraped, "total": len(queries)}

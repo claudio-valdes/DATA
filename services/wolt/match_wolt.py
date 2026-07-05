@@ -1,13 +1,6 @@
 """
 Match bronze_wolt venues to silver_restaurants and upsert into wolt_enrichments.
 Zero API calls — reads only from Supabase tables.
-
-Required env vars:
-    NEXT_PUBLIC_SUPABASE_URL
-    SERVICE_ROLE_KEY
-
-Usage:
-    python entrypoints/match_wolt.py
 """
 
 from difflib import SequenceMatcher
@@ -74,7 +67,8 @@ def build_enrichment_record(place_id: str, venue: dict) -> dict:
     }
 
 
-def main():
+def match_bronze_to_silver() -> dict:
+    """Match bronze_wolt venues to silver_restaurants and upsert wolt_enrichments. Returns summary counts."""
     supabase = get_client()
 
     # Load silver restaurants
@@ -118,7 +112,4 @@ def main():
     print(f"\n✓ Matched and upserted:      {matched:,}")
     print(f"  Unmatched (not in silver): {unmatched:,}")
     print(f"  wolt_enrichments rows:     {r.count:,}")
-
-
-if __name__ == "__main__":
-    main()
+    return {"matched": matched, "unmatched": unmatched, "wolt_enrichments_rows": r.count}
